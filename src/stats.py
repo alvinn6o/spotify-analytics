@@ -3,6 +3,7 @@ from data import load_json, filter_period
 
 import pandas as pd
 from typing import List, Tuple
+from spotipy import SpotifyException
 
 
 def fetch_recent_streams(sp, limit: int = 50) -> pd.DataFrame:
@@ -78,22 +79,55 @@ def fetch_top_tracks(sp, limit=50, time_range='long_term'):
     return df
 
 
-def fetch_audio_features(sp, df_tracks):
-    '''
-    features of tracks for machine learning recommendations
-    '''
-
-    if df_tracks.empty:
+def fetch_audio_features(sp, df_tracks: pd.DataFrame) -> pd.DataFrame:
+    """
+    fetch features in batches and mergee
+    """
+    if df_tracks.empty or "trackId" not in df_tracks.columns:
         return df_tracks
 
-    features = sp.audio_features(df_tracks['trackId'].tolist())
-    df_features = pd.DataFrame(features)[[
-        "id", "danceability", "energy", "valence", "tempo", "acousticness", "instrumentalness", "liveness", "loudness"
+    track_ids = df_tracks["trackId"].dropna().unique().tolist()
+    if not track_ids:
+        return df_tracks
+
+    all_features = []
+
+    BATCH_SIZE = 50
+
+    try:
+        for i in range(0, len(track_ids), BATCH_SIZE):
+            batch_ids = track_ids[i : i + BATCH_SIZE]
+            features = sp.audio_features(batch_ids)
+            if features:
+                all_features.extend([f for f in features if f is not None])
+    except SpotifyException as e:
+        import streamlit as st
+        st.error(
+            "Spotify blocked the audio-features request (403). "
+            "Showing top tracks without danceability/energy/valence/tempo."
+        )
+        return df_tracks
+
+    if not all_features:
+        return df_tracks
+
+    df_features = pd.DataFrame(all_features)[[
+        "id",
+        "danceability",
+        "energy",
+        "valence",
+        "tempo",
+        "acousticness",
+        "instrumentalness",
+        "liveness",
+        "speechiness",
     ]]
 
-    df_features.rename(columns={'id' : 'trackId'}, inplace=True)
+    df_features.rename(columns={"id": "trackId"}, inplace=True)
 
-    return df_tracks.merge(df_features, on='trackId', how='left')
+
+    df_merged = df_tracks.merge(df_features, on="trackId", how="left")
+    return df_merged
 
 
 def create_wrapped(sp):
@@ -217,13 +251,10 @@ def get_listening_time_per_day(df: pd.DataFrame) -> pd.DataFrame:
     # total listening per actual day
     daily_totals = df.groupby(['date', 'weekday'], as_index=False)['msPlayed'].sum()
 
-    # now average those totals by weekday
     weekday_avg = daily_totals.groupby('weekday', as_index=False)['msPlayed'].mean()
 
-    # convert ms → hours
     weekday_avg['Hours'] = (weekday_avg['msPlayed'] / 1000 / 60 / 60).round(2)
 
-    # reorder weekdays
     days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     weekday_avg['weekday'] = pd.Categorical(weekday_avg['weekday'], categories=days, ordered=True)
     weekday_avg = weekday_avg.sort_values('weekday')
