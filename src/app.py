@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 import spotipy
+from render import render_mini_wrapped_view
 from spotipy.oauth2 import SpotifyOAuth
 
 from data import load_json, filter_period
@@ -61,70 +62,6 @@ def get_spotify_client() -> spotipy.Spotify | None:
     st.info("Log in with spotify:")
     st.link_button("Log in", auth_url, type="primary")
     return None
-
-
-
-def render_mini_wrapped_view(sp):
-    st.subheader("Spotify Mini Wrapped")
-
-    wrapped = create_wrapped(sp)
-
-    range_map = {
-        "short": "Last 4 weeks",
-        "medium": "Last 6 months",
-        "long": "Several years",
-    }
-
-    label_to_key = {
-        "Last 4 weeks": "short",
-        "Last 6 months": "medium",
-        "Several years": "long",
-    }
-
-    time_label = st.selectbox(
-        "Select time range:",
-        options=list(label_to_key.keys()),
-    )
-
-    key = label_to_key[time_label]
-    entry = wrapped.get(key, {})
-
-    artists_df = entry.get("artists", pd.DataFrame())
-    tracks_df = entry.get("tracks", pd.DataFrame())
-
-    st.subheader(f"Top artists ({time_label})")
-    if artists_df.empty:
-        st.write("Data unavailable.")
-    else:
-        st.dataframe(
-            artists_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    st.markdown("---")
-
-    st.subheader(f"Top tracks ({time_label})")
-    if tracks_df.empty:
-        st.write("No track data available from Spotify for this range.")
-    else:
-        display_cols = [
-            "trackName",
-            "artistName",
-            "durationMs",
-            "popularity",
-            "danceability",
-            "energy",
-            "valence",
-            "tempo",
-        ]
-        display_cols = [c for c in display_cols if c in tracks_df.columns]
-
-        st.dataframe(
-            tracks_df[display_cols],
-            use_container_width=True,
-            hide_index=True,
-        )
 
 
 def main():

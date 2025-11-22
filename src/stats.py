@@ -146,10 +146,9 @@ def create_wrapped(sp):
     wrapped = {}
 
     for entry, range in time_ranges.items():
-        # get artists and tracks fro each time range
         artists = fetch_top_artists(sp, limit=50, time_range=range)
         tracks = fetch_top_tracks(sp, limit=50, time_range=range)
-        tracks = fetch_audio_features(sp, tracks)
+        #tracks = fetch_audio_features(sp, tracks)
 
         wrapped[entry] = {
             'artists' : artists,
