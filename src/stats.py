@@ -3,7 +3,6 @@ from data import load_json, filter_period
 
 import pandas as pd
 from typing import List, Tuple
-from spotipy import SpotifyException
 
 
 def fetch_recent_streams(sp, limit: int = 50) -> pd.DataFrame:
@@ -79,62 +78,6 @@ def fetch_top_tracks(sp, limit=50, time_range='long_term'):
     return df
 
 
-def fetch_audio_features(sp, df_tracks: pd.DataFrame) -> pd.DataFrame:
-    """
-    Fetch audio features in batches and merge them back into df_tracks.
-    If Spotify rejects the request (403, etc.), return df_tracks unchanged
-    and show a friendly message instead of crashing the app.
-    """
-    if df_tracks.empty or "trackId" not in df_tracks.columns:
-        return df_tracks
-
-    track_ids = df_tracks["trackId"].dropna().unique().tolist()
-    if not track_ids:
-        return df_tracks
-
-    all_features = []
-    BATCH_SIZE = 50  # safe batch size
-
-    import streamlit as st  # import once here
-
-    for i in range(0, len(track_ids), BATCH_SIZE):
-        batch_ids = track_ids[i : i + BATCH_SIZE]
-        try:
-            features = sp.audio_features(batch_ids)
-        except Exception as e:
-            # Catch *anything* from this call so it never kills the app
-            st.warning(
-                "Could not load audio features from Spotify. "
-                "Showing top tracks without danceability/energy/valence/tempo."
-            )
-            # Optional: log details to server logs only
-            # print(f"audio_features error: {e}")
-            return df_tracks
-
-        if features:
-            all_features.extend([f for f in features if f is not None])
-
-    if not all_features:
-        return df_tracks
-
-    df_features = pd.DataFrame(all_features)[[
-        "id",
-        "danceability",
-        "energy",
-        "valence",
-        "tempo",
-        "acousticness",
-        "instrumentalness",
-        "liveness",
-        "speechiness",
-    ]]
-
-    df_features.rename(columns={"id": "trackId"}, inplace=True)
-
-    df_merged = df_tracks.merge(df_features, on="trackId", how="left")
-    return df_merged
-
-
 
 def create_wrapped(sp):
     time_ranges = {
@@ -148,7 +91,6 @@ def create_wrapped(sp):
     for entry, range in time_ranges.items():
         artists = fetch_top_artists(sp, limit=50, time_range=range)
         tracks = fetch_top_tracks(sp, limit=50, time_range=range)
-        #tracks = fetch_audio_features(sp, tracks)
 
         wrapped[entry] = {
             'artists' : artists,

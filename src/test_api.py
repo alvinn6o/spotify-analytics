@@ -13,26 +13,7 @@ def get_sp():
             client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"],
             redirect_uri=st.secrets["SPOTIFY_REDIRECT_URI"],
             scope=SCOPES,
-            cache_path=".cache-spotify-test",  # optional, keeps test separate
-            show_dialog=True                    # forces re-consent sometimes
+            cache_path=".cache-spotify-test",
+            show_dialog=True                   
         )
     )
-
-
-
-def main():
-    st.title("Test Spotify API Locally")
-
-    sp = get_sp()
-
-    st.write("📡 Calling Spotify API...")
-    df = fetch_top_artists(sp, limit=50, time_range='long_term')
-
-    st.subheader("Result:")
-    st.dataframe(df, use_container_width=True)
-
-    st.write("Number of rows:", df.shape[0])
-
-
-if __name__ == "__main__":
-    main()

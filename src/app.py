@@ -5,17 +5,9 @@ import spotipy
 from render import render_mini_wrapped_view
 from spotipy.oauth2 import SpotifyOAuth
 
-from data import load_json, filter_period
+#from data import load_json, filter_period
 from stats import create_wrapped
 
-DATA_DIR = 'data'
-
-'''
-@st.cache_data
-def load_data() -> pd.DataFrame:
-    df = load_json(DATA_DIR)
-    return df
-'''
 
 SCOPES = "user-read-email user-top-read user-read-recently-played"
 
