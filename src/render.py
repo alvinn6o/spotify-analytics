@@ -1,12 +1,14 @@
 import streamlit as st
 import spotipy
-from stats import create_wrapped, fetch_recent_streams, create_wrapped
 import pandas as pd
+
+from stats import create_wrapped, fetch_recent_streams
+
 
 def render_mini_wrapped_view(sp: spotipy.Spotify):
     st.subheader("Spotify Mini Wrapped")
 
-    # Pre-fetch data
+    # ── Fetch data once ────────────────────────────────────────────────────────
     wrapped = create_wrapped(sp)
     recent_df = fetch_recent_streams(sp, limit=50)
 
@@ -28,7 +30,7 @@ def render_mini_wrapped_view(sp: spotipy.Spotify):
 
     col_left, col_right = st.columns(2)
 
-    # ── 1a + 1b: top 5 artists + per-artist songs ─────────────────────────────
+    # ───────────────────────── LEFT COLUMN ─────────────────────────────────────
     with col_left:
         st.markdown(f"### Top 5 artists ({time_label})")
 
@@ -38,47 +40,95 @@ def render_mini_wrapped_view(sp: spotipy.Spotify):
         else:
             artists = artists_df.copy()
 
-            # Approx minutes from durations of their top tracks (not true yearly time)
-            if not tracks_df.empty and {"artistId", "durationMs"} <= set(tracks_df.columns):
-                artist_time = (
-                    tracks_df.groupby("artistId", as_index=False)["durationMs"].sum()
-                )
-                artist_time["Minutes"] = (artist_time["durationMs"] / 1000 / 60).round().astype(int)
-                artists = artists.merge(
-                    artist_time[["artistId", "Minutes"]],
-                    on="artistId",
-                    how="left",
-                )
-                artists["Minutes"].fillna(0, inplace=True)
+            # If we have durations per track, approximate minutes per artist
+            if (
+                not tracks_df.empty
+                and {"durationMs"}.issubset(tracks_df.columns)
+            ):
+                if "artistId" in tracks_df.columns and "artistId" in artists.columns:
+                    # Use artistId if available
+                    artist_time = (
+                        tracks_df.groupby("artistId", as_index=False)["durationMs"]
+                        .sum()
+                        .rename(columns={"durationMs": "totalMs"})
+                    )
+                    artists = artists.merge(
+                        artist_time,
+                        on="artistId",
+                        how="left",
+                    )
+                else:
+                    # Fallback: group by artistName
+                    artist_time = (
+                        tracks_df.groupby("artistName", as_index=False)["durationMs"]
+                        .sum()
+                        .rename(columns={"durationMs": "totalMs"})
+                    )
+                    artists = artists.merge(
+                        artist_time,
+                        on="artistName",
+                        how="left",
+                    )
+
+                artists["Minutes"] = (artists["totalMs"] / 1000 / 60).round().astype("Int64")
+                artists.drop(columns=["totalMs"], inplace=True)
+                artists["Minutes"] = artists["Minutes"].fillna(0)
             else:
                 artists["Minutes"] = 0
 
+            # Take top 5 by Minutes (then popularity as tie-breaker)
+            artists = artists.sort_values(
+                by=["Minutes", "popularity"],
+                ascending=[False, False],
+            )
             top5_artists = artists.head(5).copy()
+
             top5_artists.insert(0, "Rank", range(1, len(top5_artists) + 1))
             top5_artists.rename(columns={"artistName": "Artist"}, inplace=True)
 
             st.dataframe(
                 top5_artists[["Rank", "Artist", "Minutes"]],
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
 
-        # top 5 songs from artist
+        # ── Top tracks for selected artist ─────────────────────────────────────
         st.markdown("Top songs for a selected artist")
+
         if not top5_artists.empty and not tracks_df.empty:
-            artist_options = {
-                row["Artist"]: row["artistId"]
-                for _, row in top5_artists.iterrows()
-            }
+            # Build selection mapping. Prefer artistId if present.
+            if "artistId" in top5_artists.columns:
+                artist_options = {
+                    row["Artist"]: row["artistId"]
+                    for _, row in top5_artists.iterrows()
+                }
+                use_ids = True
+            else:
+                # Fallback: map by name only
+                artist_options = {
+                    row["Artist"]: row["Artist"]
+                    for _, row in top5_artists.iterrows()
+                }
+                use_ids = False
 
             selected_name = st.selectbox(
                 "Pick an artist:",
                 options=list(artist_options.keys()),
                 key=f"artist_select_{key}",
             )
-            selected_id = artist_options[selected_name]
+            selected_key = artist_options[selected_name]
 
-            artist_tracks = tracks_df[tracks_df["artistId"] == selected_id].copy()
+            # Filter tracks
+            if use_ids and "artistId" in tracks_df.columns:
+                artist_tracks = tracks_df[tracks_df["artistId"] == selected_key].copy()
+            else:
+                # Fallback: filter by artistName text
+                artist_tracks = tracks_df[
+                    tracks_df["artistName"].str.contains(
+                        selected_name, case=False, na=False
+                    )
+                ].copy()
+
             if artist_tracks.empty:
                 st.write("No tracks found for this artist in your top tracks.")
             else:
@@ -88,13 +138,13 @@ def render_mini_wrapped_view(sp: spotipy.Spotify):
 
                 st.dataframe(
                     artist_tracks[["Song", "Minutes", "popularity"]].head(5),
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                 )
         else:
             st.caption("Need both top artists and tracks to show artist songs.")
 
-    # top tracks + full list
+    # ───────────────────────── RIGHT COLUMN ────────────────────────────────────
     with col_right:
         st.markdown(f"### Top tracks ({time_label})")
 
@@ -104,26 +154,27 @@ def render_mini_wrapped_view(sp: spotipy.Spotify):
             tracks = tracks_df.copy()
             tracks.insert(0, "Rank", range(1, len(tracks) + 1))
             tracks["Minutes"] = (tracks["durationMs"] / 1000 / 60).round(1)
-            tracks.rename(columns={"trackName": "Song", "artistName": "Artist"}, inplace=True)
+            tracks.rename(
+                columns={"trackName": "Song", "artistName": "Artist"},
+                inplace=True,
+            )
 
             top5_tracks = tracks.head(5)
 
-            # top 5 songs
             st.dataframe(
                 top5_tracks[["Rank", "Song", "Artist", "Minutes", "popularity"]],
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
 
-            # expanded top songs (50)
             with st.expander("Show full top tracks list (up to 50)"):
                 st.dataframe(
                     tracks[["Rank", "Song", "Artist", "Minutes", "popularity"]],
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                 )
 
-    # recently streamed songs
+    # ───────────────────── Recently streamed songs ────────────────────────────
     st.markdown("---")
     st.subheader("Recently streamed songs")
 
@@ -144,15 +195,15 @@ def render_mini_wrapped_view(sp: spotipy.Spotify):
 
         st.dataframe(
             recent[["Played at", "Artist", "Song", "Minutes", "Weekday"]],
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
-    # total listening time
+    # ───────────────────── Total listening (approx) ───────────────────────────
     st.markdown("---")
     st.subheader("Approximate listening time (from top tracks)")
 
-    if tracks_df.empty:
+    if tracks_df.empty or "durationMs" not in tracks_df.columns:
         st.write("Not enough data to estimate listening time.")
     else:
         total_ms = tracks_df["durationMs"].sum()

@@ -66,10 +66,13 @@ def fetch_top_tracks(sp, limit=50, time_range='long_term'):
     tracks = []
 
     for track in fetched.get('items', []):
+        primary_artist = track['artists'][0] if track['artists'] else {}
+
         tracks.append({
             'trackId' : track['id'],
             'trackName' : track['name'],
             'artistName' : ', '.join(artist['name'] for artist in track['artists']),
+            'artistId' : primary_artist.get('id'),
             'durationMs' : track['duration_ms'],
             'popularity' : track['popularity']
         })
