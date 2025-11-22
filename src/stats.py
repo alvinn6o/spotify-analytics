@@ -81,7 +81,9 @@ def fetch_top_tracks(sp, limit=50, time_range='long_term'):
 
 def fetch_audio_features(sp, df_tracks: pd.DataFrame) -> pd.DataFrame:
     """
-    fetch features in batches and mergee
+    Fetch audio features in batches and merge them back into df_tracks.
+    If Spotify rejects the request (403, etc.), return df_tracks unchanged
+    and show a friendly message instead of crashing the app.
     """
     if df_tracks.empty or "trackId" not in df_tracks.columns:
         return df_tracks
@@ -91,22 +93,26 @@ def fetch_audio_features(sp, df_tracks: pd.DataFrame) -> pd.DataFrame:
         return df_tracks
 
     all_features = []
+    BATCH_SIZE = 50  # safe batch size
 
-    BATCH_SIZE = 50
+    import streamlit as st  # import once here
 
-    try:
-        for i in range(0, len(track_ids), BATCH_SIZE):
-            batch_ids = track_ids[i : i + BATCH_SIZE]
+    for i in range(0, len(track_ids), BATCH_SIZE):
+        batch_ids = track_ids[i : i + BATCH_SIZE]
+        try:
             features = sp.audio_features(batch_ids)
-            if features:
-                all_features.extend([f for f in features if f is not None])
-    except SpotifyException as e:
-        import streamlit as st
-        st.error(
-            "Spotify blocked the audio-features request (403). "
-            "Showing top tracks without danceability/energy/valence/tempo."
-        )
-        return df_tracks
+        except Exception as e:
+            # Catch *anything* from this call so it never kills the app
+            st.warning(
+                "Could not load audio features from Spotify. "
+                "Showing top tracks without danceability/energy/valence/tempo."
+            )
+            # Optional: log details to server logs only
+            # print(f"audio_features error: {e}")
+            return df_tracks
+
+        if features:
+            all_features.extend([f for f in features if f is not None])
 
     if not all_features:
         return df_tracks
@@ -125,9 +131,9 @@ def fetch_audio_features(sp, df_tracks: pd.DataFrame) -> pd.DataFrame:
 
     df_features.rename(columns={"id": "trackId"}, inplace=True)
 
-
     df_merged = df_tracks.merge(df_features, on="trackId", how="left")
     return df_merged
+
 
 
 def create_wrapped(sp):
