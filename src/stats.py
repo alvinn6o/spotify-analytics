@@ -5,6 +5,125 @@ import pandas as pd
 from typing import List, Tuple
 
 
+def fetch_recent_streams(sp, limit: int = 50) -> pd.DataFrame:
+    '''
+    fetch the most recent 50 streams for the user and turn into
+    pd data frame
+    '''
+
+    fetched = sp.current_user_recently_played(limit=limit)
+
+    streams = []
+    for item in fetched.get('items', []):
+        played_at = pd.to_datetime(item['played_at'])
+        track = item['track']
+
+        track_name = track['name']
+        artist = track['artists'][0] if track['artists'] else {}
+        artist_name = artist.get('name', 'NA')
+        artist_id = artist.get('id')
+        ms_played = track.get('duration_ms', 0)
+
+        streams.append(
+            {
+                'endTime' : played_at,
+                'artistName' : artist_name,
+                'trackName' : track_name,
+                'msPlayed' : ms_played,
+                'artistId' : artist_id
+            }
+        )
+    
+    df = pd.DataFrame(streams)
+    if not df.empty:
+        df['weekday'] = df['endTime'].dt.day_name()
+
+    return df
+
+
+def fetch_top_artists(sp, limit=50, time_range='long_term'):
+
+    fetched = sp.current_user_top_artists(limit=limit, time_range=time_range)
+
+    artists = []
+    for artist in fetched.get('items', []):
+        artists.append(
+            {
+                'artistId' : artist['id'],
+                'artistName' : artist['name'],
+                'popularity' : artist['popularity'],
+                'genres' : ', '.join(artist.get('genres', [])),
+            }
+        )
+    
+    df = pd.DataFrame(artists)
+    return df
+
+def fetch_top_tracks(sp, limit=50, time_range='long_term'):
+
+    fetched = sp.current_user_top_tracks(limit=limit, time_range=time_range)
+
+    tracks = []
+
+    for track in fetched.get('items', []):
+        tracks.append({
+            'trackId' : track['id'],
+            'trackName' : track['name'],
+            'artistName' : ', '.join(artist['name'] for artist in track['artists']),
+            'durationMs' : track['duration_ms'],
+            'popularity' : track['popularity']
+        })
+    
+    df = pd.DataFrame(tracks)
+    return df
+
+
+def fetch_audio_features(sp, df_tracks):
+    '''
+    features of tracks for machine learning recommendations
+    '''
+
+    if df_tracks.empty:
+        return df_tracks
+
+    features = sp.audio_features(df_tracks['trackId'].tolist())
+    df_features = pd.DataFrame(features)[[
+        "id", "danceability", "energy", "valence", "tempo", "acousticness", "instrumentalness", "liveness", "loudness"
+    ]]
+
+    df_features.rename(columns={'id' : 'trackId'}, inplace=True)
+
+    return df_tracks.merge(df_features, on='trackId', how='left')
+
+
+def create_wrapped(sp):
+    time_ranges = {
+        'short' : 'short_term',
+        'medium' : 'medium_term',
+        'long' : 'long_term'
+    }
+
+    wrapped = {}
+
+    for entry, range in time_ranges.items():
+        # get artists and tracks fro each time range
+        artists = fetch_top_artists(sp, limit=50, time_range=range)
+        tracks = fetch_top_tracks(sp, limit=50, time_range=range)
+        tracks = fetch_audio_features(sp, tracks)
+
+        wrapped[entry] = {
+            'artists' : artists,
+            'tracks' : tracks
+        }
+    
+    return wrapped
+
+
+'''
+Below are functions used in initial testing with personal data
+'''
+        
+
 def get_top_5_artists(df: pd.DataFrame) -> pd.DataFrame:
     '''
     return top 5 artists with stteaming time
